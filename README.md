@@ -37,6 +37,38 @@ Azure Function (Queue trigger) ────────┘
 
 ---
 
+## Security and Compliance
+
+### Threat Model
+
+This system mitigates:
+- ✅ Accidental execution of malicious files via double-click
+- ✅ Accidental execution on mounted filesystems (removed execute permissions)
+- ✅ Unintentional running of uploaded executables and scripts
+
+**Important**: This system allows uploads of any file type but interrupts execution paths. Users should primarily upload data files, not executables.
+
+This system does NOT prevent:
+- ❌ Users from uploading malicious files (uploads are allowed)
+- ❌ Determined users from renaming files or adding execute permissions
+- ❌ Execution via explicit invocation (e.g., `python malware.py.sus`)
+- ❌ Social engineering or other attack vectors
+
+### RBAC Requirements
+
+| Identity | Role | Scope | Purpose |
+|----------|------|-------|---------|
+| Function Managed Identity | Storage Blob Data Owner | Target storage account | Read/write files, modify ACLs |
+| Event Grid System Identity | Storage Queue Data Message Sender | Storage queue | Send events to processing queue |
+
+### Data Privacy
+
+- No file contents are read or stored outside the original storage account
+- Only metadata (filename, timestamp) is added during quarantine process
+- All operations use Azure managed identities - no credentials stored in code
+
+---
+
 ## Quick Start
 
 ### Prerequisites
@@ -289,72 +321,7 @@ This solution is designed to be extremely cost-effective:
 - **Storage Queue**: ~$0.10 per million operations
 - **Total cost**: Essentially zero for typical workloads, scales linearly with usage
 
----
 
-## Security and Compliance
 
-### Threat Model
 
-This system mitigates:
-- ✅ Accidental execution of malicious files via double-click
-- ✅ Accidental execution on mounted filesystems (removed execute permissions)
-- ✅ Unintentional running of uploaded executables and scripts
 
-**Important**: This system allows uploads of any file type but interrupts execution paths. Users should primarily upload data files, not executables.
-
-This system does NOT prevent:
-- ❌ Users from uploading malicious files (uploads are allowed)
-- ❌ Determined users from renaming files or adding execute permissions
-- ❌ Execution via explicit invocation (e.g., `python malware.py.sus`)
-- ❌ Social engineering or other attack vectors
-
-### RBAC Requirements
-
-| Identity | Role | Scope | Purpose |
-|----------|------|-------|---------|
-| Function Managed Identity | Storage Blob Data Owner | Target storage account | Read/write files, modify ACLs |
-| Event Grid System Identity | Storage Queue Data Message Sender | Storage queue | Send events to processing queue |
-
-### Data Privacy
-
-- No file contents are read or stored outside the original storage account
-- Only metadata (filename, timestamp) is added during quarantine process
-- All operations use Azure managed identities - no credentials stored in code
-
----
-
-## Contributing
-
-This project follows conventional commit standards and includes comprehensive GitHub Copilot instructions for AI-assisted development.
-
-### Pull Request Guidelines
-
-- Include unit tests for new functionality
-- Update documentation for configuration changes  
-- Follow existing code style (Black formatting, type hints)
-- Ensure idempotent behavior for all operations
-
-### Extending the System
-
-Common customizations:
-- **Add file extensions**: Update `BLOCKLIST` environment variable
-- **Custom processing logic**: Modify `_is_dangerous()` function
-- **Additional metadata**: Extend quarantine metadata in rename operation
-- **Integration hooks**: Add calls to external systems in processing pipeline
-
----
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
----
-
-## Support
-
-For technical issues:
-- Check the [troubleshooting section](#troubleshooting) above
-- Review Application Insights logs for your Function App
-- Create an issue in this repository with relevant error messages and configuration
-
-For feature requests or contributions, please open a GitHub issue or pull request.

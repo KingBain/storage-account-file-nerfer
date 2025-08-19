@@ -1,4 +1,4 @@
-# Azure HNS No-Exec + Quarantine
+# Azure Storage File Nerfing
 
 An **event-driven security guardrail** for Azure Storage accounts with **Hierarchical Namespace (ADLS Gen2)** that prevents accidental execution of uploaded files by:
 

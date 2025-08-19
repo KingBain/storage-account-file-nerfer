@@ -1,223 +1,360 @@
-# Storage Account File Nerfer
+# Azure HNS No-Exec + Quarantine
 
-This repo implements an **event‑driven safety layer** on an Azure Storage account with **Hierarchical Namespace (ADLS Gen2)**:
+An **event-driven security guardrail** for Azure Storage accounts with **Hierarchical Namespace (ADLS Gen2)** that prevents accidental execution of uploaded files by:
 
-* Strip Linux execute bits on uploaded files (accidental exec guard for mounts).
-* Quarantine risky Windows file types by renaming to `*.danger` (kills double‑click).
-* Burst‑tolerant via **Event Grid → Storage Queue → Azure Functions (Consumption)**.
+- **Removing execute permissions** from all uploaded files for owner, group, and other (prevents accidental execution on mounted filesystems)
+- **Quarantining risky file types** by renaming them to `*.sus` (breaks Windows double-click execution)
+- **Processing files in near real-time/on-demand** via Event Grid → Storage Queue → Azure Functions pipeline
 
-> If someone deliberately renames or re‑adds `+x`, that’s on them. We’re preventing accidents, not policing intent.
+> **Important**: This system does NOT block file uploads - users can still upload executables and scripts. Instead, it **interrupts accidental execution** by removing execute permissions and renaming dangerous file types. **Users should primarily be uploading data files**, not executables.
+
+> **Philosophy**: We prevent accidents, not intent. If users deliberately rename files or re-add execute permissions, that's their choice. This system guards against unintentional execution vectors.
 
 ---
 
-## Architecture (at a glance)
+## Architecture Overview
 
 ```
-[User Uploads] → Storage (HNS)
-       │  BlobCreated
-       ▼
-  Event Grid  —(system‑assigned identity)→  Storage Queue (ingest-events)
-       ▼                                       ▲  batched dequeues
-   Azure Function (Queue trigger)
-       ├─ HNS: get_access_control → remove x → rename *.danger (atomic)
-       └─ Tag metadata (quarantined=true, originalName)
+[File Upload] → ADLS Gen2 Storage (HNS enabled)
+       │
+       ▼ BlobCreated event
+   Event Grid ──(system identity)──→ Storage Queue
+       │                               ▲
+       ▼                               │ batched processing
+Azure Function (Queue trigger) ────────┘
+       │
+       ├─ get_access_control() → remove execute permissions (owner/group/other)
+       ├─ check extension against blocklist
+       └─ atomic rename to *.sus + set metadata
 ```
 
-### Why this design
+### Why This Design
 
-* **Cheap**: Event Grid + Functions (Consumption) are basically free at modest volume.
-* **Resilient**: Queue buffers spikes; function scales out automatically.
-* **HNS‑only features**: POSIX ACLs + atomic rename are clean and fast.
-
----
-
-## Repo layout
-
-```
-├── .devcontainer/           # Ready-to-code container (Python 3.11, Az CLI, Core Tools)
-├── deploy/deploy.sh         # Creates Function App, identity, RBAC, queue, and zip‑deploys
-├── infra/acl-setup.sh       # Sets default "no‑exec" ACLs on upload directory
-└── function_app/            # Azure Functions (Python) project
-    ├── QueueProcessor/      # Queue-triggered function
-    ├── host.json            # batching + logging
-    ├── requirements.txt     # runtime deps
-    └── local.settings.json.example
-```
+- **Cost-effective**: Event Grid + Consumption Functions scale to zero and cost pennies
+- **Resilient**: Queue buffering handles traffic spikes; automatic retry with poison queue fallback
+- **HNS-native**: Leverages POSIX ACLs and atomic renames for clean, race-free operations
+- **Burst-tolerant**: Processes up to 16 files per batch with configurable thresholds
 
 ---
 
-## Prerequisites
+## Quick Start
 
-* Azure subscription + permission to assign roles on the Storage account.
-* Storage account **with HNS enabled** (ADLS Gen2).
-* VS Code with Dev Containers *or* local Python 3.11 and Azure Functions Core Tools v4.
-* Azure CLI (`az`), logged in to the correct tenant/sub.
+### Prerequisites
 
-Optional but recommended:
+- Azure subscription with permissions to create resources and assign RBAC
+- Storage account with **Hierarchical Namespace enabled** (ADLS Gen2)
+- Azure CLI (`az`) installed and authenticated
+- **Optional**: VS Code with Dev Containers extension for streamlined development
 
-* **Azurite** for local `AzureWebJobsStorage` (the example uses `UseDevelopmentStorage=true`).
-
----
-
-## Quick start (local dev)
-
-1. Open the repo in VS Code and **Reopen in Container**.
-2. Post‑create script will set up a `.venv` and install deps. If you’re not using devcontainers:
-
-   ```bash
-   python3.11 -m venv .venv && source .venv/bin/activate
-   pip install -r function_app/requirements.txt
-   ```
-3. Copy `function_app/local.settings.json.example` → `function_app/local.settings.json` and edit values as needed for local testing.
-4. Run the function host:
-
-   ```bash
-   func start
-   ```
-
-> Local events: you can enqueue test messages into the queue or call the handler with a mocked body.
-
----
-
-## Bootstrap HNS ACLs (one‑time per upload path)
-
-Set default ACLs so **new files inherit no execute bit**:
+### 1. Clone and Setup Development Environment
 
 ```bash
+git clone <your-repo-url>
+cd azure-hns-quarantine
+
+# Option A: VS Code Dev Container (recommended)
+code .
+# Choose "Reopen in Container" when prompted
+
+# Option B: Local Python setup
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r function_app/requirements.txt
+```
+
+### 2. Configure Environment
+
+```bash
+# Configure deployment settings
+# Edit .env with your subscription ID, resource group, and storage account names
+cp .env.example .env
+
+# Configure local development settings
+# Edit local.settings.json with your actual connection strings and account names
+cp function_app/local.settings.json.example function_app/local.settings.json
+
+# Update these required values in local.settings.json:
+#   - AzureWebJobsStorage: Your development storage connection string
+#   - QueueConnection: Connection string to storage account with queue
+#   - STORAGE_ACCOUNT: Your HNS-enabled storage account name
+```
+
+### 3. Deploy Infrastructure
+
+```bash
+# Deploy Function App, managed identity, RBAC, and Event Grid subscription
+bash deploy/deploy.sh
+```
+
+### 4. Set Up Local Development Permissions (For local testing)
+
+```bash
+# Configure your environment variables
+export HNS_ACCOUNT="your-storage-account-name"
+export RG="your-resource-group"
+
+# Grant your user account the necessary permissions for local development
+bash function_app/local-acl.sh
+```
+
+### 5. Set Default ACLs (One-time per upload directory)
+
+```bash
+# Ensure new files inherit no execute permissions
 bash infra/acl-setup.sh \
-  SUBSCRIPTION_ID=<subid> \
-  HNS_ACCOUNT=<your-hns-storage-account> \
+  SUBSCRIPTION_ID=<your-sub-id> \
+  HNS_ACCOUNT=<your-storage-account> \
   FILESYSTEM=uploads \
   UPLOAD_PATH=incoming
 ```
 
-This ensures directory traversal works but **files default to `rw-`** (no `x`).
+---
+
+## Configuration
+
+### Environment Variables
+
+Configure these in your Function App settings or `local.settings.json`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STORAGE_ACCOUNT` | *required* | Name of your HNS-enabled storage account |
+| `IS_HNS` | `true` | Must be `true` - this solution requires HNS features |
+| `RENAME_MODE` | `blocklist` | `blocklist` (recommended) or `three` (rename any 3-char extension) |
+| `BLOCKLIST` | `.exe,.com,.bat,.cmd,.scr,.msi,.msp,.ps1,.ps2,.vbs,.vbe,.js,.jse,.wsf,.wsh,.hta,.jar,.dll,.reg,.cpl,.lnk` | Comma-separated list of risky file extensions |
+| `QueueConnection` | *required* | Connection string for the storage queue |
+
+### Default Blocklist
+
+The system blocks these extensions by default:
+```
+.exe, .com, .bat, .cmd, .scr, .msi, .msp, .ps1, .ps2, 
+.vbs, .vbe, .js, .jse, .wsf, .wsh, .hta, .jar, .dll, 
+.reg, .cpl, .lnk
+```
+
+### Queue Processing Configuration
+
+Function batching is optimized in `host.json`:
+- **Batch size**: 16 messages per execution
+- **New batch threshold**: 8 messages
+- **Max retries**: 5 attempts before poison queue
+- **Visibility timeout**: 30 seconds
 
 ---
 
-## Deploy to Azure (Consumption plan)
+## How It Works
 
-Script creates a Function App + managed identity, grants RBAC, creates queue, and zip‑deploys code. Before first deploy, enable Oryx build so the platform installs `requirements.txt` automatically.
+### File Processing Pipeline
+
+1. **File uploaded** to HNS storage account
+2. **Event Grid** captures `BlobCreated` event and forwards to Storage Queue
+3. **Azure Function** processes queue messages in batches:
+   - Strips execute permissions from file ACLs (`rwxr-xr-x` → `rw-r--r--`)
+   - Checks filename against blocklist
+   - If blocked: atomically renames to `filename.ext.sus`
+   - Sets metadata: `sus=true`, `originalName`, `timestamp`
+
+### Security Model
+
+- **Managed Identity authentication** - no connection strings or keys in code
+- **Principle of least privilege** - Function identity has minimal required permissions
+- **Fail-safe design** - errors are logged and retried; poison queue captures persistent failures
+- **Idempotent operations** - safe to reprocess the same file multiple times
+
+---
+
+## Development
+
+### Local Development
 
 ```bash
-# once per app (or add these lines into deploy.sh after function creation)
-az functionapp config appsettings set -g <RG> -n <APP> --settings \
-  SCM_DO_BUILD_DURING_DEPLOYMENT=true ENABLE_ORYX_BUILD=true
+# 1. Configure local settings (copy from example and edit)
+cp function_app/local.settings.json.example function_app/local.settings.json
 
-# deploy
-bash deploy/deploy.sh \
-  SUBSCRIPTION_ID=<subid> RG=<rg> LOC=canadacentral \
-  FUNC_NAME=hns-quarantine-func HNS_ACCOUNT=<your-hns-storage-account> \
-  FILESYSTEM=uploads QUEUE_NAME=ingest-events
+# 2. Edit local.settings.json and update these required values:
+#    - AzureWebJobsStorage: Connection string to your development storage
+#    - QueueConnection: Connection string to storage account with your queue
+#    - STORAGE_ACCOUNT: Name of your HNS-enabled storage account
+
+# 3. Set up local permissions (required for HNS operations)
+# Edit function_app/local-acl.sh and set your environment variables:
+export HNS_ACCOUNT="your-storage-account-name"
+export RG="your-resource-group"
+bash function_app/local-acl.sh
+
+# 4. Start the Functions runtime locally
+func start
+
+# Test with sample queue messages (manually enqueue events to test processing)
 ```
 
-### Wire Event Grid → Queue & grant sender role
-
-The script prints an example `az eventgrid event-subscription create`. After creating it, assign **Storage Queue Data Message Sender** to that subscription’s identity on the queue resource scope:
+### Code Quality
 
 ```bash
-EG_PRINCIPAL_ID=$(az eventgrid event-subscription show \
-  --name hns-quarantine-egsub --source-resource-id "$STORAGE_ID" \
-  --query identity.principalId -o tsv)
+# Format code
+black function_app/
 
-QUEUE_SCOPE="/subscriptions/<subid>/resourceGroups/<rg>/providers/Microsoft.Storage/storageAccounts/<account>/queueServices/default/queues/ingest-events"
+# Lint
+flake8 function_app/
 
-az role assignment create \
-  --assignee-object-id "$EG_PRINCIPAL_ID" \
-  --assignee-principal-type ServicePrincipal \
-  --role "Storage Queue Data Message Sender" \
-  --scope "$QUEUE_SCOPE"
+# Update dependencies
+pip-compile function_app/requirements.in -o function_app/requirements.txt
+pip-sync function_app/requirements.txt
+```
+
+### Testing
+
+Upload test files to verify the system:
+
+```bash
+# Upload a blocked file type
+az storage blob upload \
+  --account-name <storage-account> \
+  --container-name uploads \
+  --name "test.exe" \
+  --file "some-test-file.exe"
+
+# Verify it was renamed to test.exe.sus with metadata
+az storage blob show \
+  --account-name <storage-account> \
+  --container-name uploads \
+  --name "test.exe.sus"
 ```
 
 ---
 
-## Configuration knobs
+## Deployment Options
 
-App settings (Function App → Configuration → Application settings):
+### Automated Deployment (Recommended)
 
-* `STORAGE_ACCOUNT` — HNS account name.
-* `IS_HNS` — `true` (we rely on HNS features).
-* `RENAME_MODE` — `blocklist` (recommended) or `three` (rename any 3‑letter ext; usually too aggressive).
-* `BLOCKLIST` — default: `.exe,.com,.bat,.cmd,.scr,.msi,.msp,.ps1,.ps2,.vbs,.vbe,.js,.jse,.wsf,.wsh,.hta,.jar,.dll,.reg,.cpl,.lnk`.
-* `QueueConnection` — connection string to the storage account that hosts the **queue** (can be the same HNS account).
+The `deploy/deploy.sh` script handles end-to-end deployment:
+- Creates Function App with Python 3.11 runtime
+- Assigns managed identity and required RBAC permissions
+- Creates Event Grid subscription with proper routing
+- Packages and deploys function code
 
-`host.json` (already tuned):
+### Manual Deployment Steps
 
-```json
-{
-  "extensions": {"queues": {"batchSize": 16, "newBatchThreshold": 8, "maxDequeueCount": 5, "visibilityTimeout": "00:00:30"}}
-}
-```
+If you prefer manual control:
 
----
-
-## How the function behaves
-
-* **On each message**: parse container/path → if HNS, `get_access_control()` and flip execute slots off; if name matches policy → atomic `rename_file` to `*.danger`; set metadata (`quarantined=true`, `originalName`, timestamp).
-* **On non‑HNS** (not our target): would fall back to copy→delete rename (kept in code for portability).
+1. **Create Function App**: Consumption plan, Python 3.11, Linux
+2. **Enable managed identity** and assign **Storage Blob Data Owner** role
+3. **Create Storage Queue** in your target storage account  
+4. **Configure app settings** with required environment variables
+5. **Create Event Grid subscription** filtering `BlobCreated` events to your queue
+6. **Grant Event Grid identity** **Storage Queue Data Message Sender** role
+7. **Deploy function code** via zip deployment or GitHub Actions
 
 ---
 
-## End‑to‑end test
+## Monitoring and Operations
 
-1. Upload `incoming/hello.exe` to the `uploads` filesystem.
-2. Confirm the blob becomes `incoming/hello.exe.danger` and has metadata `quarantined=true`.
-3. If you mount the storage (ABFS/NFS/blobfuse2), verify `+x` is cleared on files.
+### Logging and Observability
 
----
+- **Application Insights** integration provides detailed execution telemetry
+- **Structured logging** includes `container`, `path`, `action`, and `result` fields
+- **Poison queue** captures messages that fail after 5 retry attempts
 
-## Ops & monitoring
+### Key Metrics to Monitor
 
-* **Poison queue**: after 5 failed dequeues, messages land in `<queue>-poison`. Investigate and re‑queue after fix.
-* **App Insights**: created by default on Function Apps. Check logs for `Quarantined` entries.
-* **Soft delete/versioning**: enable on containers for easy restore if a rename goes sideways.
+- Queue depth and processing latency
+- Function execution count and duration  
+- Error rates and poison queue message count
+- Storage account request rates and throttling
 
----
+### Troubleshooting
 
-## Security model & limits (be realistic)
+**Function fails to start:**
+- Ensure `ENABLE_ORYX_BUILD=true` for automatic dependency installation
+- Verify all required app settings are configured
 
-* We prevent accidental execution. A determined user can download and `chmod +x` or rename.
-* Default ACLs + function enforcement cover mounted access paths. Consider `noexec` mount option wherever practical.
-* Use **Managed Identity**; no keys are stored in code. RBAC scopes:
+**Queue not receiving events:**
+- Check Event Grid subscription is active and properly filtered
+- Verify Event Grid identity has **Storage Queue Data Message Sender** role
 
-  * Function MI → **Storage Blob Data Owner** on HNS account (needed for ACL+rename)
-  * Event Grid identity → **Storage Queue Data Message Sender** on the queue
-
----
-
-## Costs (rule of thumb)
-
-* Event Grid: first 100k ops/month free; then dollars per million.
-* Functions (Consumption): 1M exec + 400k GB‑s free/month; we’re doing tiny bursts.
-* Storage Queue: fractions of a cent per 10k ops.
-* Net: essentially noise unless you’re ingesting at massive scale.
+**Files not being processed:**
+- Check Function App logs in Application Insights
+- Verify managed identity has **Storage Blob Data Owner** on target storage account
+- Confirm `STORAGE_ACCOUNT` setting matches your HNS account name
 
 ---
 
-## Troubleshooting
+## Cost Considerations
 
-* **Functions starts but fails on import** → Ensure Oryx build settings are present or publish via `func azure functionapp publish <app> --python`.
-* **Queue not receiving events** → Grant Event Grid identity the **Queue Data Message Sender** role on the queue.
-* **Regex crash** in `_is_dangerous` → The pattern must be:
+This solution is designed to be extremely cost-effective:
 
-  ```python
-  m = re.search(r"\.([A-Za-z0-9]{1,10})$", name)
-  ```
-* **HNS APIs failing** → Confirm `STORAGE_ACCOUNT` is set and MI has **Blob Data Owner**.
+- **Event Grid**: First 100K operations/month free, then ~$0.60 per million
+- **Azure Functions**: 1M executions + 400K GB-seconds free monthly  
+- **Storage Queue**: ~$0.10 per million operations
+- **Total cost**: Essentially zero for typical workloads, scales linearly with usage
 
 ---
 
-## Common dev tasks
+## Security and Compliance
 
-* **Run locally**: `func start`
-* **Lint**: `pip install black flake8 && black --check function_app && flake8 function_app`
-* **Bump deps**: `pip install pip-tools && pip-compile -o function_app/requirements.txt && pip-sync function_app/requirements.txt`
-* **Publish (alt)**: `func azure functionapp publish <app> --python`
+### Threat Model
+
+This system mitigates:
+- ✅ Accidental execution of malicious files via double-click
+- ✅ Accidental execution on mounted filesystems (removed execute permissions)
+- ✅ Unintentional running of uploaded executables and scripts
+
+**Important**: This system allows uploads of any file type but interrupts execution paths. Users should primarily upload data files, not executables.
+
+This system does NOT prevent:
+- ❌ Users from uploading malicious files (uploads are allowed)
+- ❌ Determined users from renaming files or adding execute permissions
+- ❌ Execution via explicit invocation (e.g., `python malware.py.sus`)
+- ❌ Social engineering or other attack vectors
+
+### RBAC Requirements
+
+| Identity | Role | Scope | Purpose |
+|----------|------|-------|---------|
+| Function Managed Identity | Storage Blob Data Owner | Target storage account | Read/write files, modify ACLs |
+| Event Grid System Identity | Storage Queue Data Message Sender | Storage queue | Send events to processing queue |
+
+### Data Privacy
+
+- No file contents are read or stored outside the original storage account
+- Only metadata (filename, timestamp) is added during quarantine process
+- All operations use Azure managed identities - no credentials stored in code
 
 ---
 
 ## Contributing
 
-* Keep logic in `QueueProcessor/__init__.py` small and testable.
-* Prefer adding extensions to the **blocklist** rather than flipping to `three`.
-* PRs should include a short note on expected cost/scale impact if changing triggers/batching.
+This project follows conventional commit standards and includes comprehensive GitHub Copilot instructions for AI-assisted development.
+
+### Pull Request Guidelines
+
+- Include unit tests for new functionality
+- Update documentation for configuration changes  
+- Follow existing code style (Black formatting, type hints)
+- Ensure idempotent behavior for all operations
+
+### Extending the System
+
+Common customizations:
+- **Add file extensions**: Update `BLOCKLIST` environment variable
+- **Custom processing logic**: Modify `_is_dangerous()` function
+- **Additional metadata**: Extend quarantine metadata in rename operation
+- **Integration hooks**: Add calls to external systems in processing pipeline
+
+---
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+---
+
+## Support
+
+For technical issues:
+- Check the [troubleshooting section](#troubleshooting) above
+- Review Application Insights logs for your Function App
+- Create an issue in this repository with relevant error messages and configuration
+
+For feature requests or contributions, please open a GitHub issue or pull request.

@@ -51,7 +51,6 @@ This system does NOT prevent:
 - ❌ Users from uploading malicious files (uploads are allowed)
 - ❌ Determined users from renaming files or adding execute permissions
 - ❌ Execution via explicit invocation (e.g., `python malware.py.sus`)
-- ❌ Social engineering or other attack vectors
 
 ### RBAC Requirements
 

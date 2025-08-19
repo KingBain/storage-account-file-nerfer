@@ -33,7 +33,6 @@ Azure Function (Queue trigger) ────────┘
 - **Cost-effective**: Event Grid + Consumption Functions scale to zero and cost pennies
 - **Resilient**: Queue buffering handles traffic spikes; automatic retry with poison queue fallback
 - **HNS-native**: Leverages POSIX ACLs and atomic renames for clean, race-free operations
-- **Burst-tolerant**: Processes up to 16 files per batch with configurable thresholds
 
 ---
 

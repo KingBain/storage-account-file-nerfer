@@ -32,7 +32,7 @@ FILESYSTEM="${FILESYSTEM:-uploads}"                      # container / filesyste
 QUEUE_NAME="${QUEUE_NAME:-ingest-events}"                # must match function.json
 
 # Optional: blocklist override
-BLOCKLIST="${BLOCKLIST:-.exe,.com,.bat,.cmd,.scr,.msi,.msp,.ps1,.ps2,.vbs,.vbe,.js,.jse,.wsf,.wsh,.hta,.jar,.dll,.reg,.cpl,.lnk}"
+BLOCKLIST="${BLOCKLIST:-.exe,.com,.bat}"
 # ====================
 
 echo "Using subscription: $SUBSCRIPTION_ID"
@@ -113,21 +113,13 @@ echo "== Create Event Grid subscription (BlobCreated -> Storage Queue) =="
 STORAGE_ID=$(az storage account show -g "$RG" -n "$HNS_ACCOUNT" --query id -o tsv)
 QUEUE_ID="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG/providers/Microsoft.Storage/storageAccounts/$HNS_ACCOUNT/queueServices/default/queues/$QUEUE_NAME"
 
-# NOTE: Using stable 'endpoint' form (no preview flags, no MI delivery).
-# If you want to filter only certain extensions, append --advanced-filter subjectEndsWith .exe .bat ... etc.
 EGSUB_NAME="${EGSUB_NAME:-hns-egsub}"
-
-# BLOCKLIST=".exe,.com,.bat,..."
-IFS=',' read -r -a EXTS <<< "$BLOCKLIST"
-
 az eventgrid event-subscription create \
   --name "$EGSUB_NAME" \
   --source-resource-id "$STORAGE_ID" \
   --endpoint-type storagequeue \
   --endpoint "$QUEUE_ID" \
-  --included-event-types Microsoft.Storage.BlobCreated \
-  --advanced-filter subject StringEndsWith "${EXTS[@]}"
-
+  --included-event-types Microsoft.Storage.BlobCreated >/dev/null
 
 echo
 echo "== Done =="

@@ -16,7 +16,7 @@ BLOCKLIST = {
     e.strip().lower()
     for e in os.getenv(
         "BLOCKLIST",
-        ".exe,.com,.bat,.cmd,.scr,.msi,.msp,.ps1,.ps2,.vbs,.vbe,.js,.jse,.wsf,.wsh,.hta,.jar,.dll,.reg,.cpl,.lnk",
+        ".exe,.com,.bat",
     ).split(",")
 }
 

@@ -1,0 +1,36 @@
+# Python virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python build / packaging
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Azure Functions artifacts
+.local/
+bin/
+obj/
+.scm/
+.secrets/
+*.user
+
+# VS Code / IDE noise
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+
+# Deployment bundles
+*.zip
+
+# Local settings (never commit secrets)
+function_app/local.settings.json

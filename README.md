@@ -67,6 +67,17 @@ This system does NOT prevent:
 
 ---
 
+## Screenshopts
+
+### User uploads test.exe
+
+<img width="800" height="264" alt="image" src="https://github.com/user-attachments/assets/9f9b82f5-1f17-4b33-9054-e5aa098731ec" />
+
+### Function catches event and renames the _sus_ file
+
+<img width="1120" height="368" alt="image" src="https://github.com/user-attachments/assets/af7e78dd-96d2-4bb4-98a1-693931dd554f" />
+
+
 ## Quick Start
 
 ### Prerequisites

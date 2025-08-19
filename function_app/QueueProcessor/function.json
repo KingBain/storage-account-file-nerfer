@@ -1,0 +1,14 @@
+{
+  "bindings": [
+    {
+      "authLevel": "function",
+      "type": "queueTrigger",
+      "direction": "in",
+      "name": "msgs",
+      "queueName": "ingest-events",
+      "connection": "QueueConnection",
+      "cardinality": "many"
+    }
+  ],
+  "scriptFile": "__init__.py"
+}

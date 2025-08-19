@@ -1,0 +1,12 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "QueueConnection": "UseDevelopmentStorage=true",
+    "STORAGE_ACCOUNT": "yourhnsaccount",
+    "IS_HNS": "true",
+    "RENAME_MODE": "blocklist",
+    "BLOCKLIST": ".exe,.com,.bat,.cmd,.scr,.msi,.msp,.ps1,.ps2,.vbs,.vbe,.js,.jse,.wsf,.wsh,.hta,.jar,.dll,.reg,.cpl,.lnk"
+  }
+}

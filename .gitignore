@@ -34,3 +34,6 @@ obj/
 
 # Local settings (never commit secrets)
 function_app/local.settings.json
+
+# deployment variables
+.env

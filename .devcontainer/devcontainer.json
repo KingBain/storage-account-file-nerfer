@@ -1,0 +1,49 @@
+// For format details, see https://aka.ms/devcontainer.json
+{
+  "name": "Azure Functions HNS Quarantine",
+  "image": "mcr.microsoft.com/devcontainers/base:noble",
+
+  "features": {
+    // Python 3.11 + tools
+    "ghcr.io/devcontainers/features/python:1": {
+      "installTools": true,
+      "version": "3.11"
+    },
+    // Node LTS (needed for Azure Functions Core Tools)
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
+    },
+    // Azure CLI
+    "ghcr.io/devcontainers/features/azure-cli:1": {}
+  },
+
+  // Run after container is created
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  // Use vscode user (not root) for comfort
+  "remoteUser": "vscode",
+
+  // Port forwarding: Azure Functions local host
+  "forwardPorts": [7071],
+  "portsAttributes": {
+    "7071": { "label": "Azure Functions host" }
+  },
+
+  // VS Code customizations
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-azuretools.vscode-azurefunctions",
+        "ms-azuretools.vscode-azureresourcegroups"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+        "azureFunctions.projectLanguage": "Python",
+        "azureFunctions.projectRuntime": "~4",
+        "azureFunctions.deploySubpath": "function_app"
+      }
+    }
+  }
+}

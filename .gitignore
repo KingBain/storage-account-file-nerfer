@@ -37,3 +37,6 @@ function_app/local.settings.json
 
 # deployment variables
 .env
+
+function_app/.python_packages/
+function_app/wheelhouse/

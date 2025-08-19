@@ -1,0 +1,123 @@
+---
+
+## applyTo: "\*\*/\*"
+
+# GitHub Copilot — Project Instructions
+
+> Repository: **Azure HNS No‑Exec + Quarantine** (event‑driven guardrail for uploads)
+>
+> Goal: **Prevent accidental execution**. On each upload: remove execute bits (HNS/ADLS Gen2) and quarantine risky extensions by renaming to `*.danger`.
+
+## Context Copilot should assume
+
+* **Platform**: Azure Functions (Python, v4), **Consumption plan**.
+* **Storage**: Azure Storage **with Hierarchical Namespace** (ADLS Gen2).
+* **Trigger flow**: Event Grid → Storage Queue → Function (queue trigger, `cardinality: many`).
+* **SDKs**: `azure-identity`, `azure-storage-file-datalake`, `azure-storage-blob`, `azure-functions`.
+* **Auth**: **DefaultAzureCredential** with **Managed Identity**. Never hard‑code keys.
+* **Policy**: Block *accidents*, not intent. If a user later re‑adds `+x` or removes `.danger`, that’s allowed by design.
+
+## Coding standards
+
+* **Language**: Python **3.11**. Use **type hints** and `from __future__ import annotations` when helpful.
+* **Logging**: Use the `logging` module (no `print`). Include `container`, `path`, `action`, and `result` in messages.
+* **Errors**: Fail **per item**, not per batch. Log and continue; rely on queue’s poison mechanism after 5 attempts.
+* **Idempotency**:
+
+  * If a name already ends with `.danger`, treat as no‑op.
+  * Clearing execute bits is safe to repeat.
+* **I/O efficiency**: Minimum network calls. Fetch once, then act. Avoid listing containers/directories in the hot path.
+* **Regex**: Use this exact pattern for extension parsing:
+
+  ```python
+  re.search(r"\.([A-Za-z0-9]{1,10})$", name)
+  ```
+* **Env config** (read at runtime; don’t inline constants):
+
+  * `STORAGE_ACCOUNT` (HNS account name)
+  * `IS_HNS` (`true` expected)
+  * `RENAME_MODE` (`blocklist` | `three`)
+  * `BLOCKLIST` (comma‑sep; default includes exe/com/bat/cmd/msi/ps1/js/etc.)
+  * `QueueConnection` (Queue service connection for trigger)
+* **Shell scripts**: Use `set -euo pipefail`, quote variables, and be idempotent.
+
+## What to generate (happy path)
+
+* Pure helpers:
+
+  * `_is_dangerous(name: str) -> bool`
+  * `_strip_exec_bits_if_hns(file_client) -> None`
+  * `_parse_container_blob_from_subject(subject: str) -> tuple[str|None, str|None]`
+* Queue handler that accepts **batched messages** and processes each independently.
+* HNS path:
+
+  * `get_access_control()` → flip execute slots 3/6/9 to `-` → `set_access_control(...)`.
+  * If risky extension: `rename_file("{container}/{dir}/{name}.danger")` (atomic) → `set_metadata({"quarantined":"true","originalName":name,"ts":iso8601})`.
+* Non‑HNS fallback exists in codebase but is **not** the primary path.
+
+## What **not** to generate
+
+* No secrets/connection strings in code or comments.
+* No extra third‑party libs beyond Azure SDKs and stdlib.
+* No long‑running loops, threads, or custom polling in the Function runtime.
+* No broad container listings or cross‑container operations.
+* Don’t “scan” file contents; we only rename and adjust ACLs.
+
+## Style & structure
+
+* Keep `__init__.py` lean: parse event → call helpers. Avoid deeply nested logic.
+* Small, testable functions. Prefer returning data over raising when a no‑op is acceptable.
+* Use constants for queue names/metadata keys.
+* Prefer f‑strings and explicit `.lower()` normalization for extension logic.
+
+## Testing guidance for Copilot
+
+* **Unit tests**: Mock storage clients.
+
+  * `_is_dangerous` with various names: already `.danger`, uppercase, multi‑dot, no extension.
+  * `_strip_exec_bits_if_hns`: input `rwxr-xr-x` → output `rw-r--r--` (only `x` removed; keep read/write bits).
+* **Behavioral**: Ensure rename not attempted for non‑blocked extensions; ensure metadata set after rename.
+* **Resilience**: If `rename_file` throws, log error and continue to next item.
+
+## Commit messages & PR hygiene
+
+* Use **Conventional Commits**: `feat:`, `fix:`, `chore:`, `docs:`, `test:`.
+* Summaries ≤ 72 chars; body explains *why*.
+* For scripts, include a “what changed/why” comment header at the top of file blocks Copilot edits.
+
+## Copilot prompt patterns (examples)
+
+* “Update `_is_dangerous` so it treats `.pif` and `.scr` as blocked; keep case‑insensitive; update tests.”
+* “Refactor the queue handler to isolate JSON parsing from business logic; add unit tests using `pytest` and `unittest.mock`.”
+* “Add structured logging fields (`container`, `path`, `action`) to all log lines in `__init__.py`.”
+* “Write a bash function in `deploy.sh` to grant ‘Storage Queue Data Message Sender’ to an Event Grid identity, idempotently.”
+
+## Security & RBAC reminders (for any generated guidance)
+
+* Function MI needs **Storage Blob Data Owner** on the HNS account.
+* Event Grid subscription identity needs **Storage Queue Data Message Sender** on the queue scope.
+* Encourage enabling `SCM_DO_BUILD_DURING_DEPLOYMENT=true` and `ENABLE_ORYX_BUILD=true` so deps install from `requirements.txt` on zip deploy.
+
+## Performance & cost notes
+
+* Keep to **one** ACL read + **optional** ACL write.
+* Rename only when necessary.
+* Let the **queue batch** drive parallelism; no manual threads.
+
+## Documentation hooks
+
+* When Copilot adds or changes env vars or policies, also update:
+
+  * `README.md` (Quick start / Config knobs)
+  * `deploy/deploy.sh` (app settings and wiring comments)
+  * `infra/acl-setup.sh` (if ACL defaults change)
+
+---
+
+### Validation checklist Copilot should satisfy before finishing a change
+
+* [ ] No secrets added; only environment variables referenced.
+* [ ] All new Python code typed and logged.
+* [ ] Unit tests updated/added for new behaviors.
+* [ ] Idempotency preserved (safe to reprocess the same event).
+* [ ] Docs/scripts updated when config surfaces changed.
